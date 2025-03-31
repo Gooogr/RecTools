@@ -23,6 +23,15 @@ from IPython.display import display
 
 from rectools import Columns
 
+from IPython.display import Image, display
+from ipywidgets.embed import embed_minimal_html
+from pyppeteer import launch
+
+import asyncio
+from pathlib import Path
+from ipywidgets.embed import embed_minimal_html
+from IPython.display import Image, display
+
 WIDGET_WIDTH = 800
 WIDGET_HEIGHT = 500
 TOP_CHART_MARGIN = 20
@@ -59,6 +68,7 @@ class MetricsApp:
         self.auto_display = auto_display
         self.scatter_kwargs = scatter_kwargs if scatter_kwargs is not None else {}
         self.fig = go.Figure()
+        self.full_widget = None
 
         if self.auto_display:
             self.display()
@@ -371,8 +381,38 @@ class MetricsApp:
             tab.children = [metrics_vbox]
             tab.set_title(0, "Metrics")
 
-        display(widgets.VBox([tab, fig_widget]))
+        # display(widgets.VBox([tab, fig_widget]))
+        self.full_widget = widgets.VBox([tab, fig_widget])
+        display(self.full_widget)
 
         self._update_fold_visibility(use_avg, fold_i)
         self._update_meta_visibility(use_meta, meta_feature)
         self._update_figure_widget(fig_widget, metric_x, metric_y, use_avg, fold_i, meta_feature, use_meta)
+
+    def static_render(self, html_filename="temp_widget.html", image_filename="widget_snapshot.png", viewport=(WIDGET_WIDTH, WIDGET_HEIGHT)) -> None:
+        """
+        Render the full interactive widget (including controls) as a static image.
+        Requires pyppeteer-lite for full JavaScript rendering.
+        """
+        if self.full_widget is None:
+            raise RuntimeError("Widget not yet initialized. Call .display() before static_render().")
+
+        embed_minimal_html(html_filename, views=[self.full_widget])
+
+        async def _screenshot():
+            browser = await launch(headless=True, args=['--no-sandbox'])
+            page = await browser.newPage()
+            await page.setViewport({'width': viewport[0], 'height': viewport[1]})
+            abs_path = Path(html_filename).resolve().as_uri()
+            await page.goto(abs_path)
+            await asyncio.sleep(5)  # give JS time to render
+            await page.screenshot({'path': image_filename, 'fullPage': True})
+            await browser.close()
+
+        import nest_asyncio
+        nest_asyncio.apply()
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(_screenshot())
+        display(Image(filename=image_filename))
+
+        
